@@ -5,9 +5,11 @@ by Dr.Maruzilla
 
 <img src="./icon-192.png" alt="XY-Synth-icon" width="256" height="256">
 
-# An interactive analog synth emulator for smartphones.
+# An interactive analog synth emulator for smartphones (For live performances only).
 
-Simply swipe the rectangular area to play on the scale "C D E G A ♪".
+Simply swipe the rectangular area horizontally to play the specified scale.
+
+Vertical swipes change the cutoff frequency.
 
 The waveform is displayed in real time within the rectangle.
 
