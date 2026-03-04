@@ -1,4 +1,4 @@
-# XY-Synth
+# XY-Synth by Dr.Maruzilla
   Demo https://maruzilla.github.io/XY-Synth/
 
 # An interactive analog synth emulator for smartphones.
