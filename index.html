@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, orientation=landscape">
+    <title>Web Synth Pro</title>
+
+    <!-- マニフェストの読み込み -->
+    <link rel="manifest" href="manifest.json">
+    <!-- iOS用のメタタグ -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
+    <script>
+      // Service Workerの登録
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js')
+          .then(() => console.log('Service Worker Registered'));
+      }
+    </script>
+
+    <style>
+        :root { --bg-color: #2c2c2c; --accent-color: #00ffff; }
+        body, html { 
+            margin: 0; padding: 0; overflow: hidden; 
+            background-color: var(--bg-color); color: var(--accent-color);
+            font-family: sans-serif; height: 100%; width: 100%;
+            user-select: none; -webkit-user-select: none; touch-action: none;
+        }
+        /* 上部コントローラ (40%) */
+        #top-panel {
+            height: 40%; display: grid; grid-template-columns: repeat(4, 1fr);
+            padding: 10px; box-sizing: border-box; font-size: 12px; gap: 5px;
+        }
+        .control-group { display: flex; flex-direction: column; align-items: center; }
+        select, input[type=range] { width: 90%; accent-color: var(--accent-color); }
+        
+        /* 下部演奏領域 (60%) */
+        #play-area {
+            position: relative; height: 60%; width: 100%;
+            border-top: 2px solid var(--accent-color); box-sizing: border-box;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        /* 16等分のスリット線 */
+        .grid-line {
+            position: absolute; top: 0; height: 100%;
+            width: 1px; background-color: rgba(0, 255, 255, 0.2);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="top-panel">
+    <div class="control-group">
+        <label>Oscillator</label>
+        <select id="oscType">
+            <option value="square">Square</option>
+            <option value="sawtooth">Saw</option>
+            <option value="triangle">Triangle</option>
+            <option value="sine">Sine</option>
+        </select>
+        <label>Gain</label>
+        <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+        <label>Key Transpose</label>
+        <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
+        <label>Octave</label>
+        <input type="range" id="octave" min="-2" max="2" step="1" value="0">
+    </div>
+    <div class="control-group">
+        <label>Resonance</label>
+        <input type="range" id="qFactor" min="0" max="20" step="0.1" value="1">
+        <label>Decay</label>
+        <input type="range" id="decay" min="0.01" max="2" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+        <label>Delay</label>
+        <input type="range" id="delay" min="0" max="1" step="0.01" value="0">
+        <label>Reverb</label>
+        <input type="range" id="reverb" min="0" max="1" step="0.01" value="0.2">
+    </div>
+</div>
+
+<div id="play-area">
+    <canvas id="visualizer"></canvas>
+    <!-- スリットの生成 -->
+    <script>
+        for(let i=1; i<16; i++) {
+            const line = document.createElement('div');
+            line.className = 'grid-line';
+            line.style.left = (i * (100/16)) + '%';
+            document.getElementById('play-area').appendChild(line);
+        }
+    </script>
+</div>
+
+<script>
+/** 
+ * Web Audio API コアロジック 
+ * iOSではユーザー操作後にAudioContextを開始する必要があります
+ */
+let audioCtx;
+let oscillator = null;
+let gainNode = null;
+let filterNode = null;
+let analyser = null;
+let freq = 0;
+let freqPrev = 0;
+
+// スケール定義 (ドレミソラ)
+const baseScale = [261.63, 293.66, 329.63, 392.00, 440.00]; // C4, D4, E4, G4, A4
+
+function initAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    filterNode = audioCtx.createBiquadFilter();
+    filterNode.type = 'lowpass';
+    
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    
+    filterNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    
+    startVisualizer();
+}
+
+function playNote(freq, cutoff) {
+    if (!audioCtx) initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    
+    stopNote(); // 前の音を止める
+
+    oscillator = audioCtx.createOscillator();
+    gainNode = audioCtx.createGain();
+    
+    oscillator.type = document.getElementById('oscType').value;
+    oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    
+    filterNode.frequency.setValueAtTime(cutoff, audioCtx.currentTime);
+    filterNode.Q.setValueAtTime(parseFloat(document.getElementById('qFactor').value), audioCtx.currentTime);
+    
+    const now = audioCtx.currentTime;
+    const decay = parseFloat(document.getElementById('decay').value);
+    const volume = parseFloat(document.getElementById('masterVol').value);
+    
+    gainNode.gain.setValueAtTime(volume, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + decay);
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(filterNode);
+    
+    oscillator.start();
+}
+
+function stopNote() {
+    if (oscillator) {
+        oscillator.stop();
+        oscillator.disconnect();
+        oscillator = null;
+    }
+}
+
+// 演奏エリアの入力処理
+const playArea = document.getElementById('play-area');
+const canvas = document.getElementById('visualizer');
+const ctx = canvas.getContext('2d');
+
+function handleMove(e) {
+    e.preventDefault();
+    const touch = e.touches ? e.touches[0] : e;
+    const rect = playArea.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+        stopNote();
+        return;
+    }
+
+    // 周波数の計算 (16等分スリット)
+    const slot = Math.floor((x / rect.width) * 16);
+    const octave = parseInt(document.getElementById('octave').value);
+    const transpose = parseInt(document.getElementById('transpose').value);
+    
+    const scaleIndex = slot % baseScale.length;
+    const octaveShift = Math.floor(slot / baseScale.length) + octave;
+    freqPrev = freq;
+    freq = baseScale[scaleIndex] * Math.pow(2, octaveShift) * Math.pow(2, transpose/12);
+    
+    // 縦方向でカットオフ (20Hz - 10000Hz)
+    const cutoff = (1 - (y / rect.height)) * 10000 + 20;
+    
+    if (freq != freqPrev) {
+      playNote(freq, cutoff);
+    }
+}
+
+playArea.addEventListener('touchstart', handleMove);
+playArea.addEventListener('touchmove', handleMove);
+playArea.addEventListener('touchend', stopNote);
+// PCマウス対応
+playArea.addEventListener('mousedown', (e) => { 
+    handleMove(e); 
+    window.onmousemove = handleMove; 
+});
+window.onmouseup = () => { stopNote(); window.onmousemove = null; };
+
+// ビジュアライザー
+function startVisualizer() {
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    function draw() {
+        requestAnimationFrame(draw);
+        canvas.width = playArea.clientWidth;
+        canvas.height = playArea.clientHeight;
+        
+        analyser.getByteTimeDomainData(dataArray);
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#00ffff';
+        ctx.beginPath();
+        
+        const sliceWidth = canvas.width / bufferLength;
+        let x = 0;
+        
+        for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = v * canvas.height / 2;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            x += sliceWidth;
+        }
+        ctx.stroke();
+    }
+    draw();
+}
+</script>
+</body>
+</html>
