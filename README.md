@@ -1,4 +1,4 @@
-# XY-Synth
+# Digital Koto XY-Synth
 by Dr.Maruzilla
 
   Demo https://maruzilla.github.io/XY-Synth/
