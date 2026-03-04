@@ -62,6 +62,12 @@
             <option value="triangle">Triangle</option>
             <option value="sine">Sine</option>
         </select>
+        <label>Scale</label>
+        <select id="scaleType">
+            <option value="full">Full notes (Chromatic)</option>
+            <option value="white">White keys (Major)</option>
+            <option value="yonanuki" selected>Yonanuki (C D E G A)</option>
+        </select>
         <label>Gain</label>
         <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.5">
     </div>
@@ -79,8 +85,8 @@
     </div>
     <div class="control-group">
         <label>Delay</label>
-        <input type="range" id="delay" min="0" max="1" step="0.01" value="0">
-        <label>Reverb</label>
+        <input type="range" id="delay" min="0" max="0.8" step="0.01" value="0">
+        <label>Reverb (Dry/Wet)</label>
         <input type="range" id="reverb" min="0" max="1" step="0.01" value="0.2">
     </div>
 </div>
@@ -103,17 +109,41 @@
  * Web Audio API コアロジック 
  * iOSではユーザー操作後にAudioContextを開始する必要があります
  */
-let audioCtx;
-let oscillator = null;
-let gainNode = null;
-let filterNode = null;
-let analyser = null;
+let audioCtx, oscillator, gainNode, filterNode, analyser;
+let currentFreqs = [];
 let freq = 0;
 let freqPrev = 0;
 
-// スケール定義 (ドレミソラ)
-const baseScale = [261.63, 293.66, 329.63, 392.00, 440.00]; // C4, D4, E4, G4, A4
+// スケール構成（半音のステップ間隔）
+const SCALES = {
+    full: [1], // クロマチック（半音ずつ）
+    white: [2, 2, 1, 2, 2, 2, 1], // メジャースケール（全全半全全全半）
+    yonanuki: [2, 2, 3, 2, 3] // ヨナ抜き（ドレミソラ）
+};
 
+// 周波数の動的計算（12平均律）
+function updateFreqs() {
+    const baseFreq = 261.63; // C4 (中央のド)
+    const transpose = parseInt(document.getElementById('transpose').value) || 0;
+    const octave = parseInt(document.getElementById('octave').value) || 0;
+    const scaleKey = document.getElementById('scaleType').value;
+    const steps = SCALES[scaleKey]; // ここでSCALESを参照
+    
+    currentFreqs = [];
+    let currentStep = transpose + (octave * 12);
+
+    for (let i = 0; i < 16; i++) {
+        // 周波数 = 基準音 * 2^(半音数/12)
+        const f = baseFreq * Math.pow(2, currentStep / 12);
+        currentFreqs.push(f);
+        
+        // 次の音へのステップ数を加算（配列をループさせる）
+        const stepIndex = i % steps.length;
+        currentStep += steps[stepIndex];
+    }
+}
+
+// オーディオ初期化
 function initAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -122,14 +152,16 @@ function initAudio() {
     filterNode.type = 'lowpass';
     
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
+    analyser.fftSize = 1024;
     
     filterNode.connect(analyser);
     analyser.connect(audioCtx.destination);
     
+    updateFreqs(); // 初期化時に必ず計算する
     startVisualizer();
 }
 
+// Play
 function playNote(freq, cutoff) {
     if (!audioCtx) initAudio();
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -140,10 +172,10 @@ function playNote(freq, cutoff) {
     gainNode = audioCtx.createGain();
     
     oscillator.type = document.getElementById('oscType').value;
-    oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.01);
     
-    filterNode.frequency.setValueAtTime(cutoff, audioCtx.currentTime);
-    filterNode.Q.setValueAtTime(parseFloat(document.getElementById('qFactor').value), audioCtx.currentTime);
+    filterNode.frequency.setTargetAtTime(cutoff, audioCtx.currentTime, 0.01);
+    filterNode.Q.value = parseFloat(document.getElementById('qFactor').value);
     
     const now = audioCtx.currentTime;
     const decay = parseFloat(document.getElementById('decay').value);
@@ -158,22 +190,24 @@ function playNote(freq, cutoff) {
     oscillator.start();
 }
 
+// Stop
 function stopNote() {
     if (oscillator) {
-        oscillator.stop();
+        try { oscillator.stop();
         oscillator.disconnect();
+    } catch(e){}
         oscillator = null;
     }
 }
 
-// 演奏エリアの入力処理
+// イベントリスナー
 const playArea = document.getElementById('play-area');
 const canvas = document.getElementById('visualizer');
 const ctx = canvas.getContext('2d');
 
 function handleMove(e) {
     e.preventDefault();
-    const touch = e.touches ? e.touches[0] : e;
+    const touch = (e.touches && e.touches[0]) ? e.touches[0] : e;
     const rect = playArea.getBoundingClientRect();
     const x = touch.clientX - rect.left;
     const y = touch.clientY - rect.top;
@@ -183,29 +217,32 @@ function handleMove(e) {
         return;
     }
 
-    // 周波数の計算 (16等分スリット)
+    // currentFreqsが空の場合は再計算
+    if (currentFreqs.length === 0) updateFreqs();
+
     const slot = Math.floor((x / rect.width) * 16);
-    const octave = parseInt(document.getElementById('octave').value);
-    const transpose = parseInt(document.getElementById('transpose').value);
-    
-    const scaleIndex = slot % baseScale.length;
-    const octaveShift = Math.floor(slot / baseScale.length) + octave;
     freqPrev = freq;
-    freq = baseScale[scaleIndex] * Math.pow(2, octaveShift) * Math.pow(2, transpose/12);
-    
-    // 縦方向でカットオフ (20Hz - 10000Hz)
-    const cutoff = (1 - (y / rect.height)) * 10000 + 20;
+    freq = currentFreqs[slot] || 440; // 万が一空でもエラー回避
+    const cutoff = (1 - (y / rect.height)) * 8000 + 50;
     
     if (freq != freqPrev) {
       playNote(freq, cutoff);
     }
 }
 
-playArea.addEventListener('touchstart', handleMove);
-playArea.addEventListener('touchmove', handleMove);
+
+// 各種設定変更時に周波数を更新
+document.getElementById('scaleType').addEventListener('change', updateFreqs);
+document.getElementById('transpose').addEventListener('input', updateFreqs);
+document.getElementById('octave').addEventListener('input', updateFreqs);
+
+playArea.addEventListener('touchstart', handleMove, {passive: false});
+playArea.addEventListener('touchmove', handleMove, {passive: false});
 playArea.addEventListener('touchend', stopNote);
+
 // PCマウス対応
 playArea.addEventListener('mousedown', (e) => { 
+    if(!audioCtx) initAudio(); 
     handleMove(e); 
     window.onmousemove = handleMove; 
 });
@@ -226,6 +263,7 @@ function startVisualizer() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.lineWidth = 2;
         ctx.strokeStyle = '#00ffff';
+        
         ctx.beginPath();
         
         const sliceWidth = canvas.width / bufferLength;
