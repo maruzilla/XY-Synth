@@ -1,7 +1,7 @@
 # XY-Synth
-Demo https://maruzilla.github.io/XY-Synth/
+# Demo https://maruzilla.github.io/XY-Synth/
 
-An interactive analog synth emulator for smartphones.
+# An interactive analog synth emulator for smartphones.
 
 Simply swipe the rectangular area to play on the scale "C D E G A ♪".
 
