@@ -3,7 +3,7 @@ by Dr.Maruzilla
 
   Demo https://maruzilla.github.io/XY-Synth/
 
-<img src="./icon-192.png" alt="XY-Synth-icon" width="192" height="192">
+<img src="./icon-192.png" alt="XY-Synth-icon" width="256" height="256">
 
 # An interactive analog synth emulator for smartphones.
 
