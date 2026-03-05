@@ -2,7 +2,7 @@
   "name": "Digital Koto XY-Synth",
   "short_name": "XYSynth",
   "start_url": "./index.html",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "landscape",
   "background_color": "#2c2c2c",
   "theme_color": "#00ffff",
