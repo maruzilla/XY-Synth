@@ -6,19 +6,20 @@
     <title>Digital Koto XY-Synth</title>
 
     <!-- マニフェストの読み込み -->
-    <link rel="manifest" href="manifest.json">
+    <!-- <link rel="manifest" href="manifest.json"> -->
+
     <!-- iOS用のメタタグ -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="icon-192.png">
 
-    <script>
+    <!-- <script>
       // Service Workerの登録
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js')
           .then(() => console.log('Service Worker Registered'));
       }
-    </script>
+    </script> -->
 
     <style>
         :root { --bg-color: #2c2c2c; --accent-color: #00ffff; }
@@ -83,7 +84,7 @@
     </div>
     <div class="control-group">
         <label>Resonance</label>
-        <input type="range" id="qFactor" min="0" max="75" step="0.1" value="1">		// max="20" 
+        <input type="range" id="qFactor" min="0" max="75" step="0.1" value="1">
         <label>Decay</label>
         <input type="range" id="decay" min="0.01" max="2" step="0.01" value="0.5">
     </div>
@@ -174,7 +175,7 @@ function playNote(freq, cutoff) {
     if (!audioCtx) initAudio();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     
-    //stopNote(); // 前の音を止める
+    stopNote(); // 前の音を止める
 
     oscillator = audioCtx.createOscillator();
     gainNode = audioCtx.createGain();
