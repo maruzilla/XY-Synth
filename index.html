@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, orientation=landscape">
+        content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no, orientation=landscape">
     <title>Digital Koto XY-Synth</title>
 
     <!-- マニフェストの読み込み -->
@@ -132,23 +132,23 @@
                 <option value="sine">Sine</option>
             </select>
             <label>Gain</label>
-            <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.5">
+            <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.25">
         </div>
         <div class="control-group">
             <label>Key Transpose</label>
             <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
             <label>Octave</label>
-            <input type="range" id="octave" min="-2" max="2" step="1" value="0">
+            <input type="range" id="octave" min="-4" max="1" step="1" value="-2">
         </div>
         <div class="control-group">
             <label>Resonance</label>
-            <input type="range" id="qFactor" min="0" max="75" step="0.1" value="1">
+            <input type="range" id="qFactor" min="0" max="40" step="0.1" value="20">
             <label>Decay</label>
-            <input type="range" id="decay" min="0.01" max="2" step="0.01" value="0.5">
+            <input type="range" id="decay" min="0.01" max="2" step="0.01" value="0.75">
         </div>
         <div class="control-group">
             <label>Delay</label>
-            <input type="range" id="delay" min="0" max="0.8" step="0.01" value="0">
+            <input type="range" id="delay" min="0" max="0.25" step="0.01" value="0">
             <label>Reverb (Dry/Wet)</label>
             <input type="range" id="reverb" min="0" max="1" step="0.01" value="0.2">
         </div>
@@ -235,26 +235,32 @@
 
             stopNote(); // 前の音を止める
 
+            const now = audioCtx.currentTime;
+            const decay = parseFloat(document.getElementById('decay').value);
+            const volume = parseFloat(document.getElementById('masterVol').value);
+            const qValue = parseFloat(document.getElementById('qFactor').value);
+
             oscillator = audioCtx.createOscillator();
             gainNode = audioCtx.createGain();
 
             oscillator.type = document.getElementById('oscType').value;
-            oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.01);
+            oscillator.frequency.setTargetAtTime(freq, now, 0.01);
 
-            filterNode.frequency.setTargetAtTime(cutoff, audioCtx.currentTime, 0.01);
-            filterNode.Q.value = parseFloat(document.getElementById('qFactor').value);
+            // --- Filterの設定 (定義済みのnow, decayを使う) ---
+            filterNode.frequency.cancelScheduledValues(now); // 前の予約をクリア（重要）
+            filterNode.frequency.setValueAtTime(cutoff, now);
+            // 0.001だと音が消えすぎるので、聴感上は20Hz程度にするのがおすすめ
+            filterNode.frequency.exponentialRampToValueAtTime(20, now + decay);
+            filterNode.Q.setValueAtTime(qValue, now);
 
-            const now = audioCtx.currentTime;
-            const decay = parseFloat(document.getElementById('decay').value);
-            const volume = parseFloat(document.getElementById('masterVol').value);
-
+            // --- Gainの設定 ---
+            gainNode.gain.cancelScheduledValues(now);
             gainNode.gain.setValueAtTime(volume, now);
             gainNode.gain.exponentialRampToValueAtTime(0.001, now + decay);
 
             oscillator.connect(gainNode);
             gainNode.connect(filterNode);
-
-            oscillator.start();
+            oscillator.start(now);
         }
 
         // Stop
@@ -284,7 +290,7 @@
                 stopNote();
                 return;
             }
-                */
+            */
 
             // currentFreqsが空の場合は再計算
             if (currentFreqs.length === 0) updateFreqs();
@@ -343,7 +349,8 @@
                 for (let i = 0; i < bufferLength; i++) {
                     const v = dataArray[i] / 128.0;
                     const y = v * canvas.height / 2;
-                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
                     x += sliceWidth;
                 }
                 ctx.stroke();
