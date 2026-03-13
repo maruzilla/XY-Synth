@@ -163,7 +163,7 @@
             <input type="range" id="masterVol" min="0" max="1" step="0.01" value="0.25">
         </div>
         <div class="control-group">
-            <label>Key Transpose</label>
+            <label>Key Transpose (<span id="transposeVal">0</span>)</label>
             <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
             <label>Octave</label>
             <input type="range" id="octave" min="-4" max="1" step="1" value="-2">
@@ -209,9 +209,12 @@
          */
         let audioCtx, oscillator, gainNode, filterNode, analyser;
         let currentFreqs = [];
+        let cutoff = 100;
         let freq = 0;
         let freqPrev = 0;
         let flgMouseUp = true;
+        let activeKeys = new Set();
+        let baseFreq = 0; // ピッチベンドの基準用
         //let currentNoteNames = []; // 音名を保持する配列
         const nScaleDiv = 16; // スケール nScaleDiv等分
 
@@ -224,6 +227,13 @@
             blues: [3, 2, 1, 1, 3, 2],		// Blues（ドミbファファ#ソラシb）
             japanese: [4, 1, 4, 2, 1],		// 日本民謡（ドミファラシ）
             okinawa: [4, 1, 2, 4, 1]		// 琉球（ドミファソシ）
+        };
+
+        // キーボードマッピング
+        const KEY_MAP = {
+            'z': 0, 'x': 1, 'c': 2, 'v': 3, 'b': 4, 'n': 5, 'm': 6,
+            'a': 7, 's': 8, 'd': 9, 'f': 10, 'g': 11, 'h': 12, 'j': 13, 'k': 14, 'l': 15,
+            'q': 16, 'w': 17, 'e': 18, 'r': 19, 't': 20, 'y': 21, 'u': 22, 'i': 23, 'o': 24, 'p': 25
         };
 
         // スリットを生成・再生成
@@ -383,7 +393,8 @@
             freqPrev = freq;
             freq = currentFreqs[slot];
             // 縦方向でカットオフ (20Hz - 8000Hz)
-            const cutoff = (1 - (y / rect.height)) * 8000 + 50;
+            cutoff = (1 - (y / rect.height)) * 8000 + 50;
+            //const cutoff = (1 - (y / rect.height)) * 8000 + 50;
 
             if (freq != freqPrev || flgMouseUp == true) {
                 playNote(freq, cutoff);
@@ -397,7 +408,15 @@
             updateGrid();
         }, { passive: false });
 
-        document.getElementById('transpose').addEventListener('input', updateFreqs);
+        //document.getElementById('transpose').addEventListener('input', updateFreqs);
+        document.getElementById('transpose').addEventListener('input', function () {
+            // 数値を書き換え
+            document.getElementById('transposeVal').innerText = this.value;
+            // 既存のグリッド更新処理を呼ぶ
+            updateGrid();
+            updateFreqs();
+        });
+
         document.getElementById('octave').addEventListener('input', updateFreqs);
 
         // タッチイベントの登録
@@ -438,6 +457,66 @@
             window.onmousemove = null;
         };
         */
+
+        // KeyEvents
+        window.addEventListener('keydown', (e) => {
+            // 1. スケール音の演奏
+            const noteIdx = KEY_MAP[e.key.toLowerCase()];
+            if (noteIdx !== undefined && !activeKeys.has(e.key)) {
+                activeKeys.add(e.key);
+                baseFreq = currentFreqs[noteIdx % currentFreqs.length];
+                const initialCutoff = 2000;
+                playNote(baseFreq, initialCutoff);
+            }
+
+            // 2. Cutoffの上げ下げ (上下キー)
+            if (filterNode && !e.ctrlKey) {
+                let currentCutoff = filterNode.frequency.value;
+                if (e.key === 'ArrowUp') {
+                    filterNode.frequency.setTargetAtTime(Math.min(currentCutoff + 500, 15000), audioCtx.currentTime, 0.05);
+                } else if (e.key === 'ArrowDown') {
+                    filterNode.frequency.setTargetAtTime(Math.max(currentCutoff - 500, 50), audioCtx.currentTime, 0.05);
+                }
+            }
+
+            // 3. 2音階ピッチベンド (PageUp/PageDown)
+            if (oscillator) {
+                if (e.key === 'PageUp') {
+                    // 全音(2半音)上げる
+                    oscillator.frequency.setTargetAtTime(baseFreq * 1.1224, audioCtx.currentTime, 0.05);
+                } else if (e.key === 'PageDown') {
+                    // 全音下げる
+                    oscillator.frequency.setTargetAtTime(baseFreq * 0.8909, audioCtx.currentTime, 0.05);
+                }
+            }
+
+            // 4. Gain調整 (Ctrl + 上下キー)
+            const volInput = document.getElementById('masterVol');
+            if (e.ctrlKey) {
+                e.preventDefault(); // ブラウザのスクロール防止
+                let newVol = parseFloat(volInput.value) + (e.key === 'ArrowUp' ? 0.05 : -0.05);
+                volInput.value = Math.max(0, Math.min(1, newVol));
+                volInput.dispatchEvent(new Event('input'));
+            }
+
+            // 5. オクターブ切替 (左右キー)
+            const octInput = document.getElementById('octave');
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                let newOct = parseInt(octInput.value) + (e.key === 'ArrowRight' ? 1 : -1);
+                octInput.value = Math.max(-2, Math.min(2, newOct));
+                octInput.dispatchEvent(new Event('input'));
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            activeKeys.delete(e.key);
+            if (activeKeys.size === 0) stopNote();
+
+            // PageUp/Downを離した時にピッチを元に戻す
+            if (oscillator && (e.key === 'PageUp' || e.key === 'PageDown')) {
+                oscillator.frequency.setTargetAtTime(baseFreq, audioCtx.currentTime, 0.05);
+            }
+        });
 
         // ビジュアライザー
         function startVisualizer() {
