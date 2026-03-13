@@ -84,6 +84,33 @@
             accent-color: var(--accent-color);
         }
 
+        /* ラベルコンテナの設定 */
+        #label-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 30px;
+            /* ラベルの高さ分 */
+            z-index: 20;
+            /* Canvas(1)より手前、スリット線(2)より手前 */
+            pointer-events: none;
+            /* タッチを透過させる（重要！） */
+        }
+
+        /* 個別の音階ラベル */
+        .note-label {
+            position: absolute;
+            top: 5px;
+            transform: translateX(-50%);
+            color: #e09010;
+            /* 鮮やかなイエロー */
+            font-size: 14px;
+            font-weight: 900;
+            text-shadow: 1px 1px 2px #000;
+            font-family: sans-serif;
+        }
+
         /* 下部演奏領域 (60%) */
         #play-area {
             position: relative;
@@ -119,7 +146,7 @@
             <select id="scaleType">
                 <option value="full">Full notes (Chromatic)</option>
                 <option value="major" selected>Major (C D E F G A B)</option>
-                <option value="minor" selected>Minor (C B Eb F G G# Bb)</option>
+                <option value="minor">Minor (C B Eb F G G# Bb)</option>
                 <option value="yonanuki">Yonanuki (C D E G A)</option>
                 <option value="blues">Blues (C Eb F F# G Bb)</option>
                 <option value="japanese">Japanese (C E F A B)</option>
@@ -156,6 +183,12 @@
     </div>
 
     <div id="play-area">
+        <!-- 音階ラベル専用のレイヤー -->
+        <div id="label-container"></div>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <div id="play-area">
         <canvas id="visualizer"></canvas>
         <!-- スリットの生成 -->
         <script>
@@ -179,11 +212,12 @@
         let freq = 0;
         let freqPrev = 0;
         let flgMouseUp = true;
+        //let currentNoteNames = []; // 音名を保持する配列
         const nScaleDiv = 16; // スケール nScaleDiv等分
 
         // スケール構成（半音のステップ間隔）
         const SCALES = {
-            full: [1], // クロマチック（半音ずつ）
+            full: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], // クロマチック（半音ずつ）
             major: [2, 2, 1, 2, 2, 2, 1],	// メジャースケール （全・全・半・全・全・全・半）
             minor: [2, 1, 2, 2, 1, 2, 2],	// メジャースケール （全・半・全・全・半・全・全）
             yonanuki: [2, 2, 3, 2, 3],		// ヨナ抜き（ドレミソラ）
@@ -194,28 +228,45 @@
 
         // スリットを生成・再生成
         function updateGrid() {
-            // 既存の線をクリア
-            const oldLines = playArea.querySelectorAll('.grid-line');
-            oldLines.forEach(l => l.remove());
+            const container = document.getElementById('label-container');
+            // 既存の線とラベルを確実に削除
+            const elements = playArea.querySelectorAll('.grid-line, .note-label');
+            elements.forEach(el => el.remove());
 
-            // 現在のスケールの1オクターブあたりの音数を取得
             const scaleKey = scaleType.value;
-            const notesInOctave = SCALES[scaleKey].length;
+            const steps = SCALES[scaleKey];
+            const notesInOctave = steps.length;
+            const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const transpose = parseInt(document.getElementById('transpose').value) || 0;
+            const octaveBase = parseInt(document.getElementById('octave').value) || 0;
+            let currentStep = transpose;
 
-            for (let i = 1; i < 16; i++) {
-                const line = document.createElement('div');
-                line.className = 'grid-line';
-                line.style.left = (i * (100 / 16)) + '%';
-
-                // ★1オクターブごとの判定ロジック
-                // (i % notesInOctave === 0) の時、そこはオクターブの区切り
-                if (i % notesInOctave === 0) {
-                    line.style.width = '3px'; // 線を太く
-                    line.style.backgroundColor = 'rgba(0, 92, 160, 0.6)'; // 色も少し明るく
-                    line.style.boxShadow = '0 0 8px rgba(0, 255, 255, 0.6)'; // 光らせるとクール
+            for (let i = 0; i < nScaleDiv; i++) {
+                // --- スリット線 (i=0以外) ---
+                if (i > 0) {
+                    const line = document.createElement('div');
+                    line.className = 'grid-line';
+                    line.style.left = (i * (100 / nScaleDiv)) + '%';
+                    // オクターブ区切り
+                    if (i % notesInOctave === 0) {
+                        line.style.width = '3px';
+                        line.style.backgroundColor = 'rgba(0, 92, 160, 0.8)';
+                        line.style.boxShadow = '0 0 10px rgba(0, 255, 255, 0.5)';
+                    }
+                    playArea.appendChild(line);
                 }
 
-                playArea.appendChild(line);
+                // --- 2. 音階ラベルの生成 (上部に配置) ---
+                const label = document.createElement('div');
+                label.className = 'note-label';
+                const nameIndex = ((currentStep % 12) + 12) % 12;
+                label.innerText = noteNames[nameIndex];
+
+                // スリットの中央に配置
+                label.style.left = (i * (100 / nScaleDiv) + (100 / nScaleDiv / 2)) + '%';
+                container.appendChild(label);
+
+                currentStep += steps[i % steps.length];
             }
         }
 
@@ -257,6 +308,7 @@
             updateFreqs(); // 初期化時に必ず計算する
             updateGrid();
             startVisualizer();
+            //scaleType.value = 0;
         }
 
         // Play
@@ -397,12 +449,11 @@
                 canvas.width = playArea.clientWidth;
                 canvas.height = playArea.clientHeight;
 
+                // --- 波形の描画
                 analyser.getByteTimeDomainData(dataArray);
-
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.lineWidth = 2;
                 ctx.strokeStyle = '#00ffff';
-
                 ctx.beginPath();
 
                 const sliceWidth = canvas.width / bufferLength;
