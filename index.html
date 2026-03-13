@@ -99,7 +99,7 @@
             display: block;
         }
 
-        /* 24等分のスリット線 */
+        /* nScaleDiv等分のスリット線 */
         .grid-line {
             position: absolute;
             top: 0;
@@ -158,10 +158,11 @@
         <canvas id="visualizer"></canvas>
         <!-- スリットの生成 -->
         <script>
-            for (let i = 1; i < 24; i++) {
+            const nScaleDivSlit = 16; // スケール nScaleDivSlit等分
+            for (let i = 1; i < nScaleDivSlit; i++) {
                 const line = document.createElement('div');
                 line.className = 'grid-line';
-                line.style.left = (i * (100 / 24)) + '%';
+                line.style.left = (i * (100 / nScaleDivSlit)) + '%';
                 document.getElementById('play-area').appendChild(line);
             }
         </script>
@@ -176,7 +177,8 @@
         let currentFreqs = [];
         let freq = 0;
         let freqPrev = 0;
-        //const nScale = 24; // スケールnScale等分
+        let flgMouseUp = true;
+        const nScaleDiv = 16; // スケール nScaleDiv等分
 
         // スケール構成（半音のステップ間隔）
         const SCALES = {
@@ -187,6 +189,33 @@
             japanese: [4, 1, 4, 2, 1],		// 日本民謡（ドミファラシ）
             okinawa: [4, 1, 2, 4, 1]			// 琉球（ドミファソシ）
         };
+
+        // スリットを生成・再生成
+        function updateGrid() {
+            // 既存の線をクリア
+            const oldLines = playArea.querySelectorAll('.grid-line');
+            oldLines.forEach(l => l.remove());
+
+            // 現在のスケールの1オクターブあたりの音数を取得
+            const scaleKey = scaleType.value;
+            const notesInOctave = SCALES[scaleKey].length;
+
+            for (let i = 1; i < 16; i++) {
+                const line = document.createElement('div');
+                line.className = 'grid-line';
+                line.style.left = (i * (100 / 16)) + '%';
+
+                // ★1オクターブごとの判定ロジック
+                // (i % notesInOctave === 0) の時、そこはオクターブの区切り
+                if (i % notesInOctave === 0) {
+                    line.style.width = '3px'; // 線を太く
+                    line.style.backgroundColor = 'rgba(0, 92, 160, 0.6)'; // 色も少し明るく
+                    line.style.boxShadow = '0 0 8px rgba(0, 255, 255, 0.6)'; // 光らせるとクール
+                }
+
+                playArea.appendChild(line);
+            }
+        }
 
         // 周波数の動的計算（12平均律）
         function updateFreqs() {
@@ -199,7 +228,7 @@
             currentFreqs = [];
             let currentStep = transpose + (octave * 12);
 
-            for (let i = 0; i < 24; i++) {
+            for (let i = 0; i < nScaleDiv; i++) {
                 // 周波数 = 基準音 * 2^(半音数/12)
                 const f = baseFreq * Math.pow(2, currentStep / 12);
                 currentFreqs.push(f);
@@ -223,8 +252,8 @@
 
             filterNode.connect(analyser);
             analyser.connect(audioCtx.destination);
-
             updateFreqs(); // 初期化時に必ず計算する
+            updateGrid();
             startVisualizer();
         }
 
@@ -236,9 +265,9 @@
             stopNote(); // 前の音を止める
 
             const now = audioCtx.currentTime;
-            const decay = parseFloat(document.getElementById('decay').value);
-            const volume = parseFloat(document.getElementById('masterVol').value);
-            const qValue = parseFloat(document.getElementById('qFactor').value);
+            const decay = parseFloat(document.getElementById('decay').value) || 0.5;
+            const volume = parseFloat(document.getElementById('masterVol').value) || 0.5;
+            const qValue = parseFloat(document.getElementById('qFactor').value) || 1
 
             oscillator = audioCtx.createOscillator();
             gainNode = audioCtx.createGain();
@@ -249,7 +278,7 @@
             // --- Filterの設定 (定義済みのnow, decayを使う) ---
             filterNode.frequency.cancelScheduledValues(now); // 前の予約をクリア（重要）
             filterNode.frequency.setValueAtTime(cutoff, now);
-            // 0.001だと音が消えすぎるので、聴感上は20Hz程度にするのがおすすめ
+            // 0.001だと音が消えすぎるので、聴感上は20Hz程度にする
             filterNode.frequency.exponentialRampToValueAtTime(20, now + decay);
             filterNode.Q.setValueAtTime(qValue, now);
 
@@ -275,41 +304,71 @@
         }
 
         // イベントリスナー
-        const playArea = document.getElementById('play-area');
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
+        const playArea = document.getElementById('play-area');
+        const scaleType = document.getElementById('scaleType');
 
         function handleMove(e) {
-            e.preventDefault();
-            const touch = (e.touches && e.touches[0]) ? e.touches[0] : e;
+            // スクロールやズームを防止
+            if (e.cancelable) e.preventDefault();
+
+            // タッチかマウスか判定して座標を取得
+            const touch = e.touches ? e.touches[0] : e;
             const rect = playArea.getBoundingClientRect();
             const x = touch.clientX - rect.left;
             const y = touch.clientY - rect.top;
-            /*
+
+            // 範囲外なら止める
             if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
                 stopNote();
                 return;
             }
-            */
 
-            // currentFreqsが空の場合は再計算
-            if (currentFreqs.length === 0) updateFreqs();
-
-            const slot = Math.floor((x / rect.width) * 24);
+            const slot = Math.floor((x / rect.width) * nScaleDiv);
             freqPrev = freq;
-            freq = currentFreqs[slot] || 440; // 万が一空でもエラー回避
+            freq = currentFreqs[slot];
+            // 縦方向でカットオフ (20Hz - 8000Hz)
             const cutoff = (1 - (y / rect.height)) * 8000 + 50;
 
-            if (freq != freqPrev) {
+            if (freq != freqPrev || flgMouseUp == true) {
                 playNote(freq, cutoff);
             }
         }
 
         // 各種設定変更時に周波数を更新
-        document.getElementById('scaleType').addEventListener('change', updateFreqs);
+        //document.getElementById('scaleType').addEventListener('change', updateFreqs);
+        document.getElementById('scaleType').addEventListener('change', (e) => {
+            updateFreqs();
+            updateGrid();
+        }, { passive: false });
+
         document.getElementById('transpose').addEventListener('input', updateFreqs);
         document.getElementById('octave').addEventListener('input', updateFreqs);
 
+        // タッチイベントの登録
+        playArea.addEventListener('touchstart', (e) => {
+            handleMove(e); // 触れた瞬間に音を鳴らす
+            flgMouseUp = false;
+        }, { passive: false });
+
+        playArea.addEventListener('touchmove', handleMove, { passive: false });
+        playArea.addEventListener('touchend', stopNote);
+
+        // マウスイベントの登録 (PC確認用)
+        playArea.addEventListener('mousedown', (e) => {
+            if (!audioCtx) initAudio();
+            handleMove(e); // クリックした瞬間に音を鳴らす
+            window.onmousemove = handleMove;
+            flgMouseUp = false;
+        });
+
+        window.onmouseup = () => {
+            flgMouseUp = true;
+            stopNote();
+            window.onmousemove = null;
+        };
+        /*
         playArea.addEventListener('touchstart', handleMove, { passive: false });
         playArea.addEventListener('touchmove', handleMove, { passive: false });
         playArea.addEventListener('touchend', stopNote);
@@ -324,6 +383,7 @@
             stopNote();
             window.onmousemove = null;
         };
+        */
 
         // ビジュアライザー
         function startVisualizer() {
