@@ -291,12 +291,13 @@
             currentFreqs = [];
             let currentStep = transpose + (octave * 12);
 
-            for (let i = 0; i < nScaleDiv; i++) {
+            for (let i = 0; i < 26; i++) {   // i < nScaleDiv
                 // 周波数 = 基準音 * 2^(半音数/12)
                 const f = baseFreq * Math.pow(2, currentStep / 12);
                 currentFreqs.push(f);
 
-                // 次の音へのステップ数を加算（配列をループさせる）
+                // 次の音へのステップ数を加算
+                //const stepIndex = i;
                 const stepIndex = i % steps.length;
                 currentStep += steps[stepIndex];
             }
@@ -356,7 +357,7 @@
             oscillator.start(now);
         }
 
-        // Stop
+        // Stop sound
         function stopNote() {
             if (oscillator) {
                 try {
@@ -394,7 +395,6 @@
             freq = currentFreqs[slot];
             // 縦方向でカットオフ (20Hz - 8000Hz)
             cutoff = (1 - (y / rect.height)) * 8000 + 50;
-            //const cutoff = (1 - (y / rect.height)) * 8000 + 50;
 
             if (freq != freqPrev || flgMouseUp == true) {
                 playNote(freq, cutoff);
@@ -419,7 +419,7 @@
 
         document.getElementById('octave').addEventListener('input', updateFreqs);
 
-        // タッチイベントの登録
+        // タッチイベント
         playArea.addEventListener('touchstart', (e) => {
             handleMove(e); // 触れた瞬間に音を鳴らす
             flgMouseUp = false;
@@ -428,7 +428,7 @@
         playArea.addEventListener('touchmove', handleMove, { passive: false });
         playArea.addEventListener('touchend', stopNote);
 
-        // マウスイベントの登録 (PC確認用)
+        // マウスイベント
         playArea.addEventListener('mousedown', (e) => {
             if (!audioCtx) initAudio();
             handleMove(e); // クリックした瞬間に音を鳴らす
@@ -460,26 +460,28 @@
 
         // KeyEvents
         window.addEventListener('keydown', (e) => {
-            // 1. スケール音の演奏
+            // スケール音の演奏
             const noteIdx = KEY_MAP[e.key.toLowerCase()];
             if (noteIdx !== undefined && !activeKeys.has(e.key)) {
                 activeKeys.add(e.key);
-                baseFreq = currentFreqs[noteIdx % currentFreqs.length];
-                const initialCutoff = 2000;
-                playNote(baseFreq, initialCutoff);
+                baseFreq = currentFreqs[noteIdx];
+                //baseFreq = currentFreqs[noteIdx % currentFreqs.length];
+                //const initialCutoff = 2000;[]
+                playNote(baseFreq, cutoff);
             }
 
-            // 2. Cutoffの上げ下げ (上下キー)
-            if (filterNode && !e.ctrlKey) {
-                let currentCutoff = filterNode.frequency.value;
-                if (e.key === 'ArrowUp') {
-                    filterNode.frequency.setTargetAtTime(Math.min(currentCutoff + 500, 15000), audioCtx.currentTime, 0.05);
-                } else if (e.key === 'ArrowDown') {
-                    filterNode.frequency.setTargetAtTime(Math.max(currentCutoff - 500, 50), audioCtx.currentTime, 0.05);
-                }
+            // --- Cutoff調整 (物理キー位置 [ ] で判定) ---
+            // JIS配列の [ ] キーは BracketLeft / BracketRight というコードになります
+            if (e.code === 'BracketRight' || e.code === 'Backslash') {        // BracketLeft
+                e.preventDefault(); // ページ内検索などの発動を防ぐ
+                // ] (BracketRight) で Down、 [ (BracketLeft) でUp
+                cutoff = (e.code === 'BracketRight') ? cutoff + cutoff / 5 : cutoff - cutoff / 5;     // cutoff + 800 : cutoff - 800;
+                // 500Hzから15000Hzの範囲に収める
+                cutoff = Math.max(500, Math.min(15000, cutoff));
+                console.log({ cutoff });
             }
 
-            // 3. 2音階ピッチベンド (PageUp/PageDown)
+            // 2音階ピッチベンド (PageUp/PageDown)
             if (oscillator) {
                 if (e.key === 'PageUp') {
                     // 全音(2半音)上げる
@@ -490,20 +492,49 @@
                 }
             }
 
-            // 4. Gain調整 (Ctrl + 上下キー)
+            // Gain調整 (Ctrl + 上下キー)
             const volInput = document.getElementById('masterVol');
             if (e.ctrlKey) {
+                let newVol = parseFloat(volInput.value);
                 e.preventDefault(); // ブラウザのスクロール防止
-                let newVol = parseFloat(volInput.value) + (e.key === 'ArrowUp' ? 0.05 : -0.05);
+                if (e.key === 'ArrowUp') {
+                    newVol = parseFloat(volInput.value) + 0.05;
+                } else if (e.key === 'ArrowDown') {
+                    newVol = parseFloat(volInput.value) - 0.05;
+                }
                 volInput.value = Math.max(0, Math.min(1, newVol));
                 volInput.dispatchEvent(new Event('input'));
             }
 
-            // 5. オクターブ切替 (左右キー)
+            // Transpose (Ctrl + 左右キー)
+            const trnInput = document.getElementById('transpose');
+            if (e.ctrlKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                let newTrn = parseFloat(trnInput.value);
+                e.preventDefault(); // ブラウザのスクロール防止
+                if (e.key === 'ArrowLeft') {
+                    newTrn = parseFloat(trnInput.value) - 1;
+                } else if (e.key === 'ArrowRight') {
+                    newTrn = parseFloat(trnInput.value) + 1;
+                }
+                trnInput.value = Math.max(-12, Math.min(12, newTrn));
+                trnInput.dispatchEvent(new Event('input'));
+            }
+
+            // オクターブ切替 ( "," でダウン、 "." でアップ )
             const octInput = document.getElementById('octave');
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                let newOct = parseInt(octInput.value) + (e.key === 'ArrowRight' ? 1 : -1);
-                octInput.value = Math.max(-2, Math.min(2, newOct));
+            // e.code を使うと物理キーで判定できるので確実
+            if (e.code === 'Comma' || e.code === 'Period') {
+                // ブラウザのデフォルト動作を防止
+                e.preventDefault();
+
+                let currentOct = parseInt(octInput.value);
+                let newOct = (e.code === 'Period') ? currentOct + 1 : currentOct - 1;
+
+                // 範囲内に収める (-4 から 2)
+                newOct = Math.max(-4, Math.min(2, newOct));
+
+                octInput.value = newOct;
+                // 数値表示(span)の更新と周波数再計算を走らせる
                 octInput.dispatchEvent(new Event('input'));
             }
         });
