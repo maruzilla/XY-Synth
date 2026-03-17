@@ -345,7 +345,7 @@
             const volume = parseFloat(document.getElementById('masterVol').value) || 0.5;
             const qValue = parseFloat(document.getElementById('qFactor').value) || 1
 
-            // ★ポルタメント（スライド）の速さ（秒）。0.05〜0.1くらいが自然です。
+            // ★ポルタメント（スライド）の速さ（秒）。0.05〜0.1くらいが自然
             const slideTime = 0.08;
 
             // --- スライド条件の判定 ---
@@ -461,7 +461,11 @@
         }, { passive: false });
 
         playArea.addEventListener('touchmove', handleMove, { passive: false });
-        playArea.addEventListener('touchend', stopNote);
+        //playArea.addEventListener('touchend', stopNote);
+        playArea.addEventListener('touchend', (e) => {
+            flgMouseUp = true;
+            stopNote();
+        }, { passive: false });
 
         // マウスイベント
         playArea.addEventListener('mousedown', (e) => {
