@@ -167,6 +167,9 @@
             <input type="range" id="transpose" min="-12" max="12" step="1" value="0">
             <label>Octave</label>
             <input type="range" id="octave" min="-4" max="1" step="1" value="-2">
+            <br />
+            <button id="slideBtn" style="background:#444; color:#0ff; border:1px solid #0ff; padding:5px;">Slide
+                OFF</button>
         </div>
         <div class="control-group">
             <label>Resonance</label>
@@ -179,12 +182,13 @@
             <input type="range" id="delay" min="0" max="0.25" step="0.01" value="0">
             <label>Reverb (Dry/Wet)</label>
             <input type="range" id="reverb" min="0" max="1" step="0.01" value="0.2">
-        </div>
-        <div class="control-group">
-            <button id="slideBtn" style="background:#444; color:#0ff; border:1px solid #0ff; padding:5px;">Slide
-                OFF</button>
+            <label>MIDI-In</label>
+            <select id="midiInput">
+                <option value="">(No Device)</option>
+            </select>
         </div>
     </div>
+
     <script>
         document.getElementById('slideBtn').onclick = function () {
             isSliding = !isSliding;
@@ -230,6 +234,7 @@
         //let currentNoteNames = []; // 音名を保持する配列
         const nScaleDiv = 16; // スケール nScaleDiv等分
         let isSliding = false;  // スライド状態を保持するグローバル変数（ボタン等で切り替え）
+        let midiAccess = null;
 
         // スケール構成（半音のステップ間隔）
         const SCALES = {
@@ -332,6 +337,7 @@
             updateFreqs(); // 初期化時に必ず計算する
             updateGrid();
             startVisualizer();
+            initMIDI();
             //scaleType.value = 0;
         }
 
@@ -403,7 +409,7 @@
             }
         }
 
-        // イベントリスナー
+        // イベントリスナー ****************
         const canvas = document.getElementById('visualizer');
         const ctx = canvas.getContext('2d');
         const playArea = document.getElementById('play-area');
@@ -454,7 +460,7 @@
 
         document.getElementById('octave').addEventListener('input', updateFreqs);
 
-        // タッチイベント
+        // タッチイベント ****************
         playArea.addEventListener('touchstart', (e) => {
             handleMove(e); // 触れた瞬間に音を鳴らす
             flgMouseUp = false;
@@ -467,7 +473,7 @@
             stopNote();
         }, { passive: false });
 
-        // マウスイベント
+        // マウスイベント ****************
         playArea.addEventListener('mousedown', (e) => {
             if (!audioCtx) initAudio();
             handleMove(e); // クリックした瞬間に音を鳴らす
@@ -481,7 +487,7 @@
             window.onmousemove = null;
         };
 
-        // KeyEvents
+        // KeyEvents ****************
         window.addEventListener('keydown', (e) => {
             // スケール音の演奏
             const noteIdx = KEY_MAP[e.key.toLowerCase()];
@@ -578,7 +584,7 @@
             }
         });
 
-        // ビジュアライザー
+        // ビジュアライザー ****************
         function startVisualizer() {
             const bufferLength = analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
@@ -608,6 +614,75 @@
                 ctx.stroke();
             }
             draw();
+        }
+        // MIDIの初期化
+        function initMIDI() {
+            const midiSelect = document.getElementById('midiInput');
+            // ★ガード: "(No Device)" (値が空) の時は、一切のMIDI入力を無視する
+            if (!midiSelect.value || event.target.id !== midiSelect.value) {
+                return;
+            }
+
+            if (navigator.requestMIDIAccess) {
+                navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure);
+            } else {
+                console.warn("このブラウザはMIDIをサポートしていません。");
+            }
+        }
+
+        function onMIDISuccess(access) {
+            midiAccess = access;
+            updateMIDIDevices();
+            // デバイスの接続/切断を監視
+            midiAccess.onstatechange = updateMIDIDevices;
+        }
+
+        function onMIDIFailure() {
+            console.error("MIDIデバイスへのアクセスに失敗しました。");
+        }
+
+        // ドロップダウンの更新
+        function updateMIDIDevices() {
+            const midiSelect = document.getElementById('midiInput');
+            const inputs = midiAccess.inputs.values();
+
+            // 現在の選択を保持しつつクリア
+            const currentSelection = midiSelect.value;
+            midiSelect.innerHTML = '<option value="">(No Device)</option>';
+
+            for (let input of inputs) {
+                const opt = document.createElement('option');
+                opt.value = input.id;
+                opt.innerText = input.name; // BLE MIDIやUSB MIDIの名前が表示されます
+                if (input.id === currentSelection) opt.selected = true;
+                midiSelect.appendChild(opt);
+
+                // イベントリスナーを設定
+                input.onmidimessage = handleMIDIMessage;
+            }
+        }
+
+        // MIDIメッセージの処理
+        function handleMIDIMessage(event) {
+            const midiSelect = document.getElementById('midiInput');
+            // ★ガード: "(No Device)" (値が空) の時は、一切のMIDI入力を無視する
+            if (!midiSelect.value || event.target.id !== midiSelect.value) {
+                return;
+            }
+
+            const [status, note, velocity] = event.data;
+            const type = status & 0xf0; // メッセージタイプ (Note On/Off)
+
+            if (type === 0x90 && velocity > 0) { // Note On
+                // MIDIノート番号を周波数に変換
+                const freq = 440 * Math.pow(2, (note - 69) / 12);
+                // ベロシティをCutoffに反映
+                cutoff = 500 + ((velocity - 1) / 126 * (15000 - 500));
+                playNote(freq, cutoff);
+
+            } else if (type === 0x80 || (type === 0x90 && velocity === 0)) { // Note Off
+                stopNote();
+            }
         }
     </script>
 </body>
