@@ -180,7 +180,19 @@
             <label>Reverb (Dry/Wet)</label>
             <input type="range" id="reverb" min="0" max="1" step="0.01" value="0.2">
         </div>
+        <div class="control-group">
+            <button id="slideBtn" style="background:#444; color:#0ff; border:1px solid #0ff; padding:5px;">Slide
+                OFF</button>
+        </div>
     </div>
+    <script>
+        document.getElementById('slideBtn').onclick = function () {
+            isSliding = !isSliding;
+            this.innerText = isSliding ? "Slide ON" : "Slide OFF";
+            this.style.backgroundColor = isSliding ? "#005555" : "#444";
+            this.blur(); // フォーカスを外してキーボード入力を有効に保つ
+        };
+    </script>
 
     <div id="play-area">
         <!-- 音階ラベル専用のレイヤー -->
@@ -217,6 +229,7 @@
         let baseFreq = 0; // ピッチベンドの基準用
         //let currentNoteNames = []; // 音名を保持する配列
         const nScaleDiv = 16; // スケール nScaleDiv等分
+        let isSliding = false;  // スライド状態を保持するグローバル変数（ボタン等で切り替え）
 
         // スケール構成（半音のステップ間隔）
         const SCALES = {
@@ -327,34 +340,56 @@
             if (!audioCtx) initAudio();
             if (audioCtx.state === 'suspended') audioCtx.resume();
 
-            stopNote(); // 前の音を止める
-
             const now = audioCtx.currentTime;
             const decay = parseFloat(document.getElementById('decay').value) || 0.5;
             const volume = parseFloat(document.getElementById('masterVol').value) || 0.5;
             const qValue = parseFloat(document.getElementById('qFactor').value) || 1
 
-            oscillator = audioCtx.createOscillator();
-            gainNode = audioCtx.createGain();
+            // ★ポルタメント（スライド）の速さ（秒）。0.05〜0.1くらいが自然です。
+            const slideTime = 0.08;
 
-            oscillator.type = document.getElementById('oscType').value;
-            oscillator.frequency.setTargetAtTime(freq, now, 0.01);
+            // --- スライド条件の判定 ---
+            // オシレーターが存在し、かつ（スライドON または 別のキーが押下中）の場合
+            if (oscillator && (isSliding || activeKeys.size > 0)) {
 
-            // --- Filterの設定 (定義済みのnow, decayを使う) ---
-            filterNode.frequency.cancelScheduledValues(now); // 前の予約をクリア（重要）
-            filterNode.frequency.setValueAtTime(cutoff, now);
-            // 0.001だと音が消えすぎるので、聴感上は20Hz程度にする
-            filterNode.frequency.exponentialRampToValueAtTime(20, now + decay);
-            filterNode.Q.setValueAtTime(qValue, now);
+                // 1. 周波数を目標値へ向かって滑らかに変える
+                oscillator.frequency.setTargetAtTime(freq, now, slideTime);
 
-            // --- Gainの設定 ---
-            gainNode.gain.cancelScheduledValues(now);
-            gainNode.gain.setValueAtTime(volume, now);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, now + decay);
+                // 2. フィルターも滑らかに追従
+                filterNode.frequency.setTargetAtTime(cutoff, now, slideTime);
+                filterNode.Q.setTargetAtTime(qValue, now, 0.01);
 
-            oscillator.connect(gainNode);
-            gainNode.connect(filterNode);
-            oscillator.start(now);
+                // 3. 音量エンベロープを再トリガー（音が消えかかっている場合を考慮）
+                gainNode.gain.cancelScheduledValues(now);
+                gainNode.gain.setTargetAtTime(volume, now, 0.01);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + decay);
+
+            } else {
+                // --- 通常の演奏：新しく音を作る ---
+                stopNote(); // 前の音を止める
+
+                oscillator = audioCtx.createOscillator();
+                gainNode = audioCtx.createGain();
+
+                oscillator.type = document.getElementById('oscType').value;
+                oscillator.frequency.setTargetAtTime(freq, now, 0.01);
+
+                // --- Filterの設定 (定義済みのnow, decayを使う) ---
+                filterNode.frequency.cancelScheduledValues(now); // 前の予約をクリア（重要）
+                filterNode.frequency.setValueAtTime(cutoff, now);
+                // 0.001だと音が消えすぎるので、聴感上は20Hz程度にする
+                filterNode.frequency.exponentialRampToValueAtTime(20, now + decay);
+                filterNode.Q.setValueAtTime(qValue, now);
+
+                // --- Gainの設定 ---
+                gainNode.gain.cancelScheduledValues(now);
+                gainNode.gain.setValueAtTime(volume, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + decay);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(filterNode);
+                oscillator.start(now);
+            }
         }
 
         // Stop sound
@@ -441,22 +476,6 @@
             stopNote();
             window.onmousemove = null;
         };
-        /*
-        playArea.addEventListener('touchstart', handleMove, { passive: false });
-        playArea.addEventListener('touchmove', handleMove, { passive: false });
-        playArea.addEventListener('touchend', stopNote);
-
-        // PCマウス対応
-        playArea.addEventListener('mousedown', (e) => {
-            if (!audioCtx) initAudio();
-            handleMove(e);
-            window.onmousemove = handleMove;
-        });
-        window.onmouseup = () => {
-            stopNote();
-            window.onmousemove = null;
-        };
-        */
 
         // KeyEvents
         window.addEventListener('keydown', (e) => {
@@ -540,8 +559,14 @@
         });
 
         window.addEventListener('keyup', (e) => {
-            activeKeys.delete(e.key);
-            if (activeKeys.size === 0) stopNote();
+            activeKeys.delete(e.key.toLowerCase());
+
+            // 他に押されているキーがなく、かつスライドボタンがOFFの時だけ音を止める
+            if (activeKeys.size === 0 && !isSliding) {
+                stopNote();
+            }
+            //activeKeys.delete(e.key);
+            //if (activeKeys.size === 0) stopNote();
 
             // PageUp/Downを離した時にピッチを元に戻す
             if (oscillator && (e.key === 'PageUp' || e.key === 'PageDown')) {
