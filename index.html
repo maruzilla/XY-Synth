@@ -489,6 +489,8 @@
 
         // KeyEvents ****************
         window.addEventListener('keydown', (e) => {
+            isSliding = true;
+
             // スケール音の演奏
             const noteIdx = KEY_MAP[e.key.toLowerCase()];
             if (noteIdx !== undefined && !activeKeys.has(e.key)) {
@@ -572,7 +574,8 @@
             activeKeys.delete(e.key.toLowerCase());
 
             // 他に押されているキーがなく、かつスライドボタンがOFFの時だけ音を止める
-            if (activeKeys.size === 0 && !isSliding) {
+            if (activeKeys.size === 0) {    //  } && !isSliding) {    // Improved control during "keyup / keydown"
+                isSliding = false;
                 stopNote();
             }
             //activeKeys.delete(e.key);
