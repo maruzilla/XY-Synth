@@ -568,6 +568,13 @@
                 // 数値表示(span)の更新と周波数再計算を走らせる
                 octInput.dispatchEvent(new Event('input'));
             }
+
+            // 数字キー押下で DropDownのスケール // The number keys and scale dropdown are linked.
+            if (e.code.startsWith('Digit') && e.key < 8) {   // Digit1, Digit2 ... (メインの数字キー) かを判定
+                scaleType.selectedIndex = e.key-1; 
+                updateFreqs();
+                updateGrid();
+            }
         });
 
         window.addEventListener('keyup', (e) => {
