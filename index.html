@@ -148,7 +148,8 @@
                 <option value="major" selected>Major (C D E F G A B)</option>
                 <option value="minor">Minor (C B Eb F G G# Bb)</option>
                 <option value="yonanuki">Yonanuki (C D E G A)</option>
-                <option value="blues">Blues (C Eb F F# G Bb)</option>
+                <option value="blues1">Blues 1 (C Eb F F# G Bb)</option>
+                <option value="blues2">Blues 2 (C Eb F F# A G Bb)</option>
                 <option value="japanese">Japanese (C E F A B)</option>
                 <option value="okinawa">Okinawa (C E F G B)</option>
             </select>
@@ -235,6 +236,9 @@
         const nScaleDiv = 16; // スケール nScaleDiv等分
         let isSliding = false;  // スライド状態を保持するグローバル変数（ボタン等で切り替え）
         let midiAccess = null;
+        let SEMITONE_RATIO = 0.52973;   //Math.pow(2, 1/12); // 約 0.52973 <-1.05946
+        let isShiftLeft = false;
+        let isShiftRight = false;
 
         // スケール構成（半音のステップ間隔）
         const SCALES = {
@@ -242,9 +246,10 @@
             major: [2, 2, 1, 2, 2, 2, 1],	// メジャースケール （全・全・半・全・全・全・半）
             minor: [2, 1, 2, 2, 1, 2, 2],	// メジャースケール （全・半・全・全・半・全・全）
             yonanuki: [2, 2, 3, 2, 3],		// ヨナ抜き（ドレミソラ）
-            blues: [3, 2, 1, 1, 3, 2],		// Blues（ドミbファファ#ソラシb）
+            blues1: [3, 2, 1, 1, 3, 2],		// Blues 1（ドミbファファ#ソシb）
+            blues2: [3, 2, 1, 2, 1, 3, 2],	// Blues 2（ドミbファファ#ソラシb）
             japanese: [4, 1, 4, 2, 1],		// 日本民謡（ドミファラシ）
-            okinawa: [4, 1, 2, 4, 1]		// 琉球（ドミファソシ）
+            okinawa: [4, 1, 2, 4, 1]		// 琉球民謡（ドミファソシ）
         };
 
         // キーボードマッピング
@@ -351,6 +356,8 @@
             const volume = parseFloat(document.getElementById('masterVol').value) || 0.5;
             const qValue = parseFloat(document.getElementById('qFactor').value) || 1
 
+            console.log({ freq, cutoff, now });
+
             // ★ポルタメント（スライド）の速さ（秒）。0.05〜0.1くらいが自然
             const slideTime = 0.08;
 
@@ -358,14 +365,14 @@
             // オシレーターが存在し、かつ（スライドON または 別のキーが押下中）の場合
             if (oscillator && (isSliding || activeKeys.size > 0)) {
 
-                // 1. 周波数を目標値へ向かって滑らかに変える
+                // 周波数を目標値へ向かって滑らかに変える
                 oscillator.frequency.setTargetAtTime(freq, now, slideTime);
 
-                // 2. フィルターも滑らかに追従
+                // フィルターも滑らかに追従
                 filterNode.frequency.setTargetAtTime(cutoff, now, slideTime);
                 filterNode.Q.setTargetAtTime(qValue, now, 0.01);
 
-                // 3. 音量エンベロープを再トリガー（音が消えかかっている場合を考慮）
+                // 音量エンベロープを再トリガー（音が消えかかっている場合を考慮）
                 gainNode.gain.cancelScheduledValues(now);
                 gainNode.gain.setTargetAtTime(volume, now, 0.01);
                 gainNode.gain.exponentialRampToValueAtTime(0.001, now + decay);
@@ -489,13 +496,25 @@
 
         // KeyEvents ****************
         window.addEventListener('keydown', (e) => {
+            if (e.code === 'ShiftLeft') isShiftLeft = true;
+            if (e.code === 'ShiftRight') isShiftRight = true;
             isSliding = true;
+            console.log(e.key );
 
             // スケール音の演奏
             const noteIdx = KEY_MAP[e.key.toLowerCase()];
-            if (noteIdx !== undefined && !activeKeys.has(e.key)) {
+            if (noteIdx !== undefined && !activeKeys.has(e.key.toLowerCase())) {
                 activeKeys.add(e.key);
-                baseFreq = currentFreqs[noteIdx];
+                // 左シフトなら半音下げる
+                if (isShiftLeft) {
+                    baseFreq = currentFreqs[noteIdx] - currentFreqs[noteIdx] / 12;
+                // 右シフトなら半音上げる
+                } else if (isShiftRight) {
+                    baseFreq = currentFreqs[noteIdx] + currentFreqs[noteIdx] / 12;
+                // 通常の音階
+                } else{
+                    baseFreq = currentFreqs[noteIdx];
+                }
                 //baseFreq = currentFreqs[noteIdx % currentFreqs.length];
                 //const initialCutoff = 2000;[]
                 playNote(baseFreq, cutoff);
@@ -512,6 +531,16 @@
                 console.log({ cutoff });
             }
 
+/*             // 左シフトなら半音下げる
+            if (e.code === 'ShiftLeft') {
+                freq = freq / SEMITONE_RATIO;
+            }
+            
+            // 右シフトなら半音上げる
+            if (e.code === 'ShiftRight') {
+                freq = freq * SEMITONE_RATIO;
+            }
+ */
             // 2音階ピッチベンド (PageUp/PageDown)
             if (oscillator) {
                 if (e.key === 'PageUp') {
@@ -570,7 +599,7 @@
             }
 
             // 数字キー押下で DropDownのスケール // The number keys and scale dropdown are linked.
-            if (e.code.startsWith('Digit') && e.key < 8) {   // Digit1, Digit2 ... (メインの数字キー) かを判定
+            if (e.code.startsWith('Digit') && e.key < 9) {   // Digit1, Digit2 ... (メインの数字キー) かを判定
                 scaleType.selectedIndex = e.key-1; 
                 updateFreqs();
                 updateGrid();
@@ -579,6 +608,8 @@
 
         window.addEventListener('keyup', (e) => {
             activeKeys.delete(e.key.toLowerCase());
+            if (e.code === 'ShiftLeft') isShiftLeft = false;
+            if (e.code === 'ShiftRight') isShiftRight = false;
 
             // 他に押されているキーがなく、かつスライドボタンがOFFの時だけ音を止める
             if (activeKeys.size === 0) {    //  } && !isSliding) {    // Improved control during "keyup / keydown"
@@ -625,6 +656,7 @@
             }
             draw();
         }
+
         // MIDIの初期化
         function initMIDI() {
             const midiSelect = document.getElementById('midiInput');
@@ -676,7 +708,7 @@
         function handleMIDIMessage(event) {
             const midiSelect = document.getElementById('midiInput');
             // ★ガード: "(No Device)" (値が空) の時は、一切のMIDI入力を無視する
-            if (!midiSelect.value || event.target.id !== midiSelect.value) {
+            if (!mid4iSelect.value || event.target.id !== midiSelect.value) {
                 return;
             }
 
